@@ -53,12 +53,54 @@ response = client.responses.create(
 # 6. 查看模型是否提出了工具调用请求
 found_tool_call = False
 
+tool_outputs = []
+
 for item in response.output:
     if item.type == "function_call":
         found_tool_call = True
         print("模型请求调用的工具：", item.name)
         print("模型提供的参数：", item.arguments)
 
+        if item.name == "calculate_study_budget":
+            arguments = json.loads(item.arguments)
+            result = calculate_study_budget(
+                days=arguments["days"],
+                minutes_per_day=arguments["minutes_per_day"],
+            )
+            print("工具执行结果：", result)
+
+            tool_outputs.append({
+                "type": "function_call_output",
+                "call_id": item.call_id,
+                "output": json.dumps(result, ensure_ascii=False),
+            })
+
 if not found_tool_call:
     print("本次没有返回工具调用。")
     print("模型回复：", response.output_text)
+
+# 7. 将工具结果传回模型，生成学习计划
+if tool_outputs:
+    # 按顺序整理用户需求、模型输出和工具结果
+    input_items = [{"role": "user", "content": goal}]
+    input_items.extend(response.output)
+    input_items.extend(tool_outputs)
+
+    print("正在生成学习计划……")
+
+    final_response = client.responses.create(
+        model=model,
+        instructions=(
+            "你是一个学习规划助手。"
+            "根据用户的学习目标和工具返回的时间预算，"
+            "用中文生成适合初学者的逐日学习计划。"
+            "计划天数和每天的学习分钟数必须与工具结果一致。"
+            "每天列出学习内容、具体操作和预计用时，"
+            "每天各项任务的用时之和必须等于当天的时间预算。"
+        ),
+        input=input_items,
+        store=False,
+    )
+
+    print("\n学习计划：")
+    print(final_response.output_text)
